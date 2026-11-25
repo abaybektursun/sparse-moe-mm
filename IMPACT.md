@@ -1,6 +1,6 @@
 # IMPACT.md — North Star Impact Ledger
 
-> **Rule of the repo:** Every research hypothesis, kernel, benchmark, and PR in `sparse-moe-mm` must map directly to one or more Impact Pillars below. If an idea stops advancing measurable real-world or scientific impact, we pivot or kill it immediately.
+> **Rule of the repo:** Every research hypothesis, kernel, benchmark, and PR in `sparse-moe-mm` must map directly to one or more Impact Pillars below. If an idea stops advancing measurable real-world or scientific impact, we pivot or kill it immediately. See [PLAN.md](./PLAN.md) for the active 4-stage execution roadmap (`O1`–`O4`, Stages A–D).
 
 ## North Star Mission
 
