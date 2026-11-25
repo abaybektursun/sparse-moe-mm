@@ -1,25 +1,55 @@
-"""sparse_moe_mm: Quantized proxy-gated sparse grouped_mm for fine-grained MoEs."""
+"""sparse-moe-mm: Zero-VRAM quantized intra-expert sparse grouped_mm for fine-grained MoE."""
 
 from sparse_moe_mm.reference import (
     MoEShape,
+    apply_expert_permutation,
     block_group_mask,
-    dequantize_int4_rowwise,
+    compute_coactivation_permutation,
     dense_moe_swiglu_ref,
+    dequantize_int4_rowwise,
+    dequantize_prog8_4_4,
+    dequantize_prog8_dual_2_6,
+    prog8_sparse_moe_ref,
     proxy_gated_sparse_moe_ref,
+    quantize_fp8_block128,
     quantize_int4_rowwise,
+    quantize_nvfp4_block16,
+    quantize_prog8_4_4,
+    quantize_prog8_dual_2_6,
+    quantize_ternary_2bit,
     sparse_moe_swiglu_ref,
 )
-from sparse_moe_mm.roofline import GPUS, MODELS, compute_roofline_table
+from sparse_moe_mm.roofline import (
+    GPUS,
+    MODELS,
+    GPUSpec,
+    ModelSpec,
+    compute_roofline_table,
+    layer_time_us,
+)
 
 __all__ = [
     "GPUS",
+    "GPUSpec",
     "MODELS",
     "MoEShape",
+    "ModelSpec",
+    "apply_expert_permutation",
     "block_group_mask",
+    "compute_coactivation_permutation",
     "compute_roofline_table",
-    "dequantize_int4_rowwise",
     "dense_moe_swiglu_ref",
+    "dequantize_int4_rowwise",
+    "dequantize_prog8_4_4",
+    "dequantize_prog8_dual_2_6",
+    "layer_time_us",
+    "prog8_sparse_moe_ref",
     "proxy_gated_sparse_moe_ref",
+    "quantize_fp8_block128",
     "quantize_int4_rowwise",
+    "quantize_nvfp4_block16",
+    "quantize_prog8_4_4",
+    "quantize_prog8_dual_2_6",
+    "quantize_ternary_2bit",
     "sparse_moe_swiglu_ref",
 ]
