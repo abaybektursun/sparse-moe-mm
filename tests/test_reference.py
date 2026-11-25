@@ -79,6 +79,13 @@ def test_prog8_4_4_and_2_6_bit_exact_reconstruction():
     # Must match 4+4 bit-exactly because both encode the exact same INT8 grid!
     assert torch.allclose(w_full2, w_full4, atol=1e-6, rtol=1e-6)
 
+    # 2-bit packed uint8 roundtrip (4 weights per byte = 0.25 B/elem)
+    from sparse_moe_mm.kernels import pack_2bit_hi, unpack_2bit_hi
+
+    packed2 = pack_2bit_hi(hi2)
+    assert packed2.dtype == torch.uint8 and packed2.shape == (4, 64, 32)
+    assert torch.equal(unpack_2bit_hi(packed2), hi2)
+
 
 def test_fp8_block128_nvfp4_block16_and_ternary_bounds():
     g = torch.Generator().manual_seed(7)
