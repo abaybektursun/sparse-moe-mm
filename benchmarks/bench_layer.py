@@ -39,10 +39,15 @@ def quantize_fp8_block128_hw(w: torch.Tensor) -> tuple[torch.Tensor, torch.Tenso
     return q.contiguous(), scale.squeeze(4).squeeze(2).contiguous()
 
 
-def bench_cuda_graph_l2_flushed(fn, warmup: int = 10, iters: int = 60, l2_flush_mb: int = 256) -> float:
-    """Capture `fn` in a CUDA Graph and return median latency in microseconds with L2 flushed each iter."""
+def bench_cuda_graph_l2_flushed(
+    fn, warmup: int = 10, iters: int = 60, l2_flush_mb: int = 256, require_graph: bool = True
+) -> float:
+    """Capture `fn` in a CUDA Graph and return median latency in microseconds with L2 flushed each iter.
+
+    If `require_graph=False` and the baseline op performs host-sync (e.g., SM80 `torch._grouped_mm`),
+    falls back cleanly to L2-flushed eager CUDA-event timing.
+    """
     flush_buf = torch.empty((l2_flush_mb * 1024 * 1024 // 4,), dtype=torch.int32, device="cuda")
-    # Warmup on side stream before capture
     s = torch.cuda.Stream()
     s.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(s):
@@ -51,10 +56,16 @@ def bench_cuda_graph_l2_flushed(fn, warmup: int = 10, iters: int = 60, l2_flush_
     torch.cuda.current_stream().wait_stream(s)
     torch.cuda.synchronize()
 
-    g = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(g):
-        fn()
-    torch.cuda.synchronize()
+    runner = fn
+    try:
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            fn()
+        torch.cuda.synchronize()
+        runner = g.replay
+    except RuntimeError:
+        if require_graph:
+            raise
 
     times_ms = []
     for _ in range(iters):
@@ -62,7 +73,7 @@ def bench_cuda_graph_l2_flushed(fn, warmup: int = 10, iters: int = 60, l2_flush_
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
-        g.replay()
+        runner()
         end.record()
         torch.cuda.synchronize()
         times_ms.append(start.elapsed_time(end))
@@ -186,7 +197,8 @@ def run_benchmark(
                     * torch._grouped_mm(x_pairs, w_up_gmm, offs=offs),
                     w_down_gmm,
                     offs=offs,
-                )
+                ),
+                require_graph=False,
             )
             if has_grouped_mm
             else float("nan")
