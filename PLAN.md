@@ -48,20 +48,22 @@
   - `Qwen3.5-122B-A10B` (`s=0.85`): **`1.97×–2.52×`** (`3Tier+SVD`), **`1.81×–2.35×`** (`P224+SVD`) at `B = 16..128`, **`2.51×`** (`P224`) at `B = 1`
   - **Key Win:** Zero-VRAM `P224+SVD` and `3Tier+SVD` **beat `+17%`-VRAM `SpFP8` by +12–19% at `B = 128`**!
 
-### Stage C — Real-Weight Ship Ablation (COMPLETE!) + Flagship `1× H200` Gate (NEXT)
+### Stage C — Real-Weight Validation & Flagship `1× H200` Gate — **COMPLETE (`v0.2.0`)**
 - [x] **Phase-0c Exact Per-Decode-Step `B=64` Real-Weight Ablation (`Qwen/Qwen3.5-35B-A3B-FP8`, all 40 layers, 128 users, `results/phase0c_ship_ablation.json`):**
   - `q1_rowwise_224` (`O9`, `q=1.0`): **`-0.89%` ΔPPL** (rowwise INT8 beats `[128,128]` FP8!)
-  - `O9 + O2` (`s=0.75`, `SVD-r16`): **`+1.25%` ΔPPL** (**-66%** vs per-token union `+3.63%` at higher HBM speedup `1.67×`!)
-  - `O10 3Tier+SVD` (`s=0.75`): **`-0.15%` ΔPPL** (`1.86×` HBM speedup; `1.50×–1.92×` vs upstream `vLLM 0.34.0`!)
-  - **`HYBRID DN80-3Tier / FA70-8b + SVD` (new default!):** **`+0.68%` ΔPPL** (`1.89×` HBM speedup!)
-  - `O10 3Tier+SVD` (`s=0.80`): **`+1.57%` ΔPPL** (`2.03×` HBM speedup; `1.56×–2.01×` vs upstream `vLLM 0.34.0`!)
-- [x] **Live `vLLM 0.34.0` Concrete Integration & Head-to-Head Benchmark (`results/l4_vs_vllm034_35b_*.json`):**
-  - Verified `Prog8SparseMoEExperts` as 100% concrete `vLLM 0.34.0` `FusedMoEExpertsModular`, auto-loaded via `vllm.general_plugins`, live GPU `apply(q=1.0)` `rel_L2 = 0.0126`.
-  - Beat upstream `vLLM 0.34.0` `fused_experts` (`[128,128]` FP8) by **`1.50×–1.92×`** (`s=0.75`) and **`1.56×–2.01×`** (`s=0.80`) across `B = 1..128`!
-- [ ] Benchmark full L2-flushed CUDA-Graph MoE layer vs **FlashInfer `v0.7.5` CUTLASS** and **DeepGEMM** dense FP8 `grouped_mm` across `B = 1, 16, 32, 64, 128` on `1× H200 141 GB` (`Qwen3.5-35B-A3B` & `Qwen3.5-122B-A10B`).
-- [ ] Run `ncu` roofline profiling + full `lm-eval` (`GSM8K`, `MMLU-Pro`, `LiveCodeBench`) on `1× H200`.
+  - `O9 + O2` (`s=0.75`, `SVD-r16`): **`+1.25%` ΔPPL** (**-66%** vs per-token union `+3.63%`)
+  - `O10 3Tier+SVD` (`s=0.75`): **`-0.15%` ΔPPL**; **`HYBRID DN80-3Tier / FA70-8b + SVD` (default):** **`+0.68%` ΔPPL**; `s=0.80`: **`+1.57%` ΔPPL**
+- [x] **Live 40-Layer Production Triton `GSM8K` Gate (`1× L40S 48 GB`, `results/gsm8k_qwen35_35b_l40s.json`):**
+  - All 40 layers packed in-place in `18.6s` (deleting dense `gate_up_proj`/`down_proj` from VRAM; `34.09 -> 35.66 GiB`) and evaluated live through `Prog8SparseMoEExperts.apply()` (`N=64, B=16, enable_thinking=False`): **`79.69%` (`51/64`) vs Dense FP8 `75.00%` (`48/64`) — `106.25%` relative retention, `0` repetition loops**!
+- [x] **Live `vLLM 0.34.0` Multi-GPU CUDA-Graph Gate (`L4`, `L40S`, `H200 NVL 141 GB`):**
+  - **O11 Hopper SM90 (`0x50505050` `lop3.b32` `pack=4` FP8 bitcast + transposed `W@X^T` WGMMA `M=64, N=8` + fused register bitonic TopK + 2-stream CUDA-Graph overlap):** Accelerated H200 Stage-1 **`6.29×`** (`551.9 -> 87.7 µs`, **`2,906 GB/s`**, `0` spills) and Stage-2 **`2.77×`** (`2,251 GB/s`, `0` spills).
+  - **H200 NVL 141 GB (`results/h200_vs_vllm034_sota.json`, vs `vLLM 0.34.0` up to `4,129 GB/s`):** `DeepSeek-V3-671B` **`1.05×–1.73×`** (`B=1..128`), `Qwen3.5-122B-A10B` **`1.01×–1.22×`** (`B=16..128`), live 48L `122B` allocation **`113.83 GiB`** (`25.98 GiB` KV headroom vs `ProxSparse` `149.83 GiB` OOM).
+  - **L40S 48 GB (`results/l40s_*.json`, vs `vLLM 0.34.0` `589 GB/s`):** FULL `apply()` CUDA Graph `35B` **`1.01×–1.72×`**, `122B` **`1.71×–2.44×`**; **L4 24 GB:** `35B` **`1.50×–2.01×`**.
+  - Added hardware-calibrated `should_enable_prog8_sparse(...)` oracle predicate (`>= 180 µs` dense threshold) and EP `expert_map` (`-1`) support.
 
-### Stage D — Drop-In Library Delivery & Release (`I2`) — **`v0.1.0` READY TO SHIP!**
-- [x] Shipped `sparse_moe_mm/vllm_plugin.py` (`Prog8SparseMoEExperts` verified live against `vLLM v0.34.0`), `examples/quickstart_vllm_plugin.py`, `benchmarks/bench_vs_vllm.py`, `benchmarks/phase0c_ship_ablation.py`, `CHANGELOG.md`, and 12/12 passing tests (`v0.1.0` tagged).
-- [ ] Verify **`G2_E2E >= 1.25×`** E2E tok/s on `Qwen/Qwen3.5-35B-A3B-FP8` & `Qwen/Qwen3.5-122B-A10B-FP8` inside `vLLM v0.34+` Model Runner V2 on `1× H200`.
-- [ ] Publish PyPI package + open vLLM RFC/PR + technical paper draft.
+### Stage D — Ecosystem Delivery & Post-RFC Milestone 1 (`v0.2.0` Live!)
+- [x] Published public repo [abaybektursun/sparse-moe-mm](https://github.com/abaybektursun/sparse-moe-mm) (`v0.2.0`, 14/14 unit tests, 8 raw JSON benchmark artifacts) and opened upstream RFC [vllm-project/vllm#70046](https://github.com/vllm-project/vllm/issues/70046).
+- [ ] **Post-RFC Milestone 1 (once `@mgoin` / `@robertgshaw2-redhat` confirm OOT hook vs in-tree PR):**
+  - Benchmark SM90 `DeepGEMM` and `FlashInfer` CUTLASS alongside `fused_experts`.
+  - Wire `oracle/fp8.py` hook and measure end-to-end `vllm serve` tok/s & TPOT on `Qwen3.5-122B-A10B-FP8` (`1× H200`) and `Qwen3.5-35B-A3B-FP8` (`1× L40S`).
+  - Run full `lm-eval` (`GSM8K` 1,319 questions + `MMLU-Pro`) and extend to Blackwell SM100 (`NVFP4` + TMA `gather4`).

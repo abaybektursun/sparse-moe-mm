@@ -2,7 +2,7 @@
 
 **Zero-VRAM, calibration-free quantized (`[128,128]` FP8 on SM89/SM90 & `1×16` NVFP4 on SM100) intra-expert sparse `grouped_mm` for fine-grained MoE serving** (`DeepSeek-V3-671B`, `Qwen3.5-122B-A10B`, `Qwen3.5/3.6-35B-A3B`), shipping as a drop-in **`vLLM v0.34+` `FusedMoEExpertsModular`** plugin.
 
-> **Start here:** Read [docs/VLLM_RFC.md](./docs/VLLM_RFC.md) (upstream `vllm-project/vllm` RFC with complete multi-GPU proof), [IMPACT.md](./IMPACT.md) (live North Star impact ledger), [PLAN.md](./PLAN.md) (execution roadmap), and [CHANGELOG.md](./CHANGELOG.md) (`v0.2.0` release notes).
+> **Start here:** Read the live upstream RFC ([vllm-project/vllm#70046](https://github.com/vllm-project/vllm/issues/70046) / [docs/VLLM_RFC.md](./docs/VLLM_RFC.md)), [IMPACT.md](./IMPACT.md) (live North Star impact ledger), [PLAN.md](./PLAN.md) (execution roadmap), and [CHANGELOG.md](./CHANGELOG.md) (`v0.2.0` release notes).
 
 ---
 
