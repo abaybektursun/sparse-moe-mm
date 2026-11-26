@@ -22,8 +22,8 @@ import time
 import types
 import torch
 
-from benchmarks.phase0b_asymmetric_bets import _find_moe_layers
-from benchmarks.phase0c_ship_ablation import _is_full_attn_layer
+from benchmarks._utils import find_moe_layers as _find_moe_layers
+from benchmarks._utils import is_full_attn_layer as _is_full_attn_layer
 from sparse_moe_mm.vllm_plugin import (
     Prog8MoEConfig,
     Prog8SparseMoEExperts,

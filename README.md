@@ -86,14 +86,13 @@ python3 benchmarks/bench_h200_sota.py
 
 ## Repository Layout
 
-- [docs/VLLM_RFC.md](./docs/VLLM_RFC.md) — Upstream `vllm-project/vllm` RFC with complete L4, L40S, H200, VRAM, and real-weight accuracy evidence.
-- [sparse_moe_mm/kernels.py](./sparse_moe_mm/kernels.py) — `O9`/`O10` SM89 & `O11` SM90 Hopper `0x50505050` WGMMA FP8 CUDA-Graph Triton kernels + register bitonic TopK + fused gather-quantize.
+- [docs/VLLM_RFC.md](./docs/VLLM_RFC.md) — Upstream RFC ([vllm-project/vllm#70046](https://github.com/vllm-project/vllm/issues/70046)) with complete L4, L40S, H200, VRAM, and real-weight accuracy evidence.
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — End-to-end architecture diagram, `2+2+4` equations, and SM89/SM90 kernel dispatch reference.
+- [sparse_moe_mm/kernels/](./sparse_moe_mm/kernels/__init__.py) — Modular Triton kernels: [`_common.py`](./sparse_moe_mm/kernels/_common.py) (Down, SVD-r16, Combine, Bitonic TopK), [`sm89.py`](./sparse_moe_mm/kernels/sm89.py) (Marlin FP16 bitcast), and [`sm90.py`](./sparse_moe_mm/kernels/sm90.py) (Hopper `O11` `0x50505050` LOP3 + `W@X^T` WGMMA FP8).
+- [sparse_moe_mm/packing.py](./sparse_moe_mm/packing.py) — `Prog8MoEConfig`, `PackedProg8ExpertWeights`, and chunked load-time HF `[128,128]` FP8 -> `2+2+4` + `SVD-r16` packer (zero-copy `w13_*` / `wg_*` / `wu_*` storage sharing).
 - [sparse_moe_mm/vllm_plugin.py](./sparse_moe_mm/vllm_plugin.py) — Drop-in `vLLM v0.34+` `FusedMoEExpertsModular` backend (`Prog8SparseMoEExperts`), `prepare_fp8_moe_layer_for_prog8`, and `should_enable_prog8_sparse`.
 - [sparse_moe_mm/reference.py](./sparse_moe_mm/reference.py) — Exact fp32 ground-truth MoE references and bitplane packing/unpacking.
 - [sparse_moe_mm/roofline.py](./sparse_moe_mm/roofline.py) — Analytical HBM + Tensor Core roofline across Hopper/Blackwell.
-- [benchmarks/bench_h200_sota.py](./benchmarks/bench_h200_sota.py) — Hopper H200 SOTA benchmark (`35B`, `122B`, `DeepSeek-V3`, live 48L `122B` VRAM proof).
-- [benchmarks/bench_vs_vllm.py](./benchmarks/bench_vs_vllm.py) — Live `vLLM v0.34+` FULL `apply()` CUDA-Graph + EP `expert_map` benchmark.
-- [benchmarks/eval_gsm8k_real.py](./benchmarks/eval_gsm8k_real.py) — Batched 40-layer real-weight `openai/gsm8k` exact-match & repetition-loop gate.
-- [benchmarks/phase0c_ship_ablation.py](./benchmarks/phase0c_ship_ablation.py) — Exact 40-layer per-decode-step `B=64` real-weight ablation on `Qwen/Qwen3.5-35B-A3B-FP8`.
+- [benchmarks/](./benchmarks/_utils.py) — Shared `_utils.py` + `bench_h200_sota.py`, `bench_vs_vllm.py`, `bench_layer.py`, `eval_gsm8k_real.py`, and `phase0c_ship_ablation.py`.
 - [examples/quickstart_vllm_plugin.py](./examples/quickstart_vllm_plugin.py) — Minimal drop-in plugin usage example.
-- [tests/test_reference.py](./tests/test_reference.py) & [tests/test_vllm_plugin.py](./tests/test_vllm_plugin.py) — 14 unit tests.
+- [tests/](./tests/) — Automated unit & contract test suite (CI-verified on Python 3.11 & 3.12).

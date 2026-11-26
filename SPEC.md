@@ -1,5 +1,6 @@
 # SPEC — Impact-Aligned Quantized Sparse `grouped_mm` (v2 — Fresh Research Reset)
 
+> **Status:** Historical v2 research specification. For the implemented `v0.2.0` architecture, kernel dispatch (`SM89` + `SM90 O11`), and verified multi-GPU numbers, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and the live upstream RFC ([vllm-project/vllm#70046](https://github.com/vllm-project/vllm/issues/70046) / [docs/VLLM_RFC.md](./docs/VLLM_RFC.md)).
 > **North Star:** See [IMPACT.md](./IMPACT.md) for the live Impact Pillars (`I1`–`I6`) and non-goals governing this spec.
 
 ## 1. Core Question (Post-`2610.37386` Reset)

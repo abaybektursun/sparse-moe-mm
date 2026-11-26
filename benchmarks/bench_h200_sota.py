@@ -33,7 +33,9 @@ from vllm.model_executor.layers.fused_moe.fused_moe import fused_experts
 from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import TopKWeightAndReduceNoOP
 from vllm.plugins import load_general_plugins
 
-from benchmarks.bench_layer import (
+from benchmarks._utils import (
+    bench_cuda_graph_l2_flushed,
+    measure_d2d_ceiling_gbs,
     quantize_fp8_block128_hw_chunked,
     sample_zipf_routing,
 )
@@ -48,59 +50,11 @@ from sparse_moe_mm.vllm_plugin import (
 )
 
 
-def measure_d2d_ceiling_gbs(size_mb: int = 512, iters: int = 40) -> float:
-    n = (size_mb * 1024 * 1024) // 4
-    a = torch.empty(n, dtype=torch.float32, device="cuda")
-    b = torch.empty_like(a)
-    for _ in range(10):
-        b.copy_(a)
-    torch.cuda.synchronize()
-    s, e = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-    s.record()
-    for _ in range(iters):
-        b.copy_(a)
-    e.record()
-    torch.cuda.synchronize()
-    ms = s.elapsed_time(e) / iters
-    # copy_ reads size_mb + writes size_mb = 2 * size_mb
-    gbs = (2.0 * size_mb * 1024 * 1024 / (ms * 1e-3)) / 1e9
-    del a, b
-    torch.cuda.empty_cache()
-    return round(gbs, 1)
-
-
 def bench_l2_flushed_256mb(fn, warmup: int = 12, iters: int = 35, require_graph: bool = False) -> float:
     """256 MB L2-flushed timing (5x H200's 50 MB L2 cache) with CUDA Graph capture."""
-    flush = torch.empty(64 * 1024 * 1024, dtype=torch.int32, device="cuda")  # 256 MB
-    for _ in range(warmup):
-        fn()
-    torch.cuda.synchronize()
-
-    use_graph = False
-    g = torch.cuda.CUDAGraph()
-    try:
-        with torch.cuda.graph(g):
-            fn()
-        use_graph = True
-    except Exception:
-        if require_graph:
-            raise
-
-    times_ms = []
-    for _ in range(iters):
-        flush.zero_()
-        s, e = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-        s.record()
-        if use_graph:
-            g.replay()
-        else:
-            fn()
-        e.record()
-        torch.cuda.synchronize()
-        times_ms.append(s.elapsed_time(e))
-    times_ms.sort()
-    del flush
-    return times_ms[len(times_ms) // 2] * 1000.0
+    return bench_cuda_graph_l2_flushed(
+        fn, warmup=warmup, iters=iters, l2_flush_mb=256, require_graph=require_graph
+    )
 
 
 def _try_build_vllm_sota_runners(

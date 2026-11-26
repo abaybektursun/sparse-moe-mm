@@ -4,7 +4,15 @@ __pycache__/
 .pytest_cache/
 dist/
 build/
-results/
+results/*
+!results/h200_vs_vllm034_sota.json
+!results/l40s_full_apply_vs_vllm034_s75.json
+!results/l40s_full_apply_vs_vllm034_s80.json
+!results/l40s_122b_s85.json
+!results/l4_vs_vllm034_35b_s75.json
+!results/l4_vs_vllm034_35b_s80.json
+!results/phase0c_ship_ablation.json
+!results/gsm8k_qwen35_35b_l40s.json
 *.pt
 *.safetensors
 *.npz

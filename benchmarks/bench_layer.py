@@ -17,6 +17,12 @@ import time
 import torch
 import torch.nn.functional as F
 
+from benchmarks._utils import (
+    bench_cuda_graph_l2_flushed,
+    pack_prog8_224_chunked,
+    quantize_fp8_block128_hw_chunked,
+    sample_zipf_routing,
+)
 from sparse_moe_mm.kernels import (
     launch_dense_fp8_grouped_mm,
     launch_prog8_224_stage1,
@@ -24,90 +30,7 @@ from sparse_moe_mm.kernels import (
     launch_sparse_fp8_stage2,
     launch_svd_recovery,
 )
-from sparse_moe_mm.reference import (
-    pack_2bit_interleaved,
-    pack_4bit_interleaved,
-    quantize_prog8_224,
-)
 from sparse_moe_mm.roofline import MODELS
-
-
-def quantize_fp8_block128_hw_chunked(w: torch.Tensor, chunk_e: int = 32) -> tuple[torch.Tensor, torch.Tensor]:
-    """Chunked [128,128] FP8 quantization keeping peak temporary VRAM tiny (fits 122B layer on 22GB L4)."""
-    e, m, n = w.shape
-    bm, bn = m // 128, n // 128
-    q_out = torch.empty((e, m, n), dtype=torch.float8_e4m3fn, device=w.device)
-    s_out = torch.empty((e, bm, bn), dtype=torch.float32, device=w.device)
-    for start in range(0, e, chunk_e):
-        end = min(e, start + chunk_e)
-        blocks = w[start:end].float().view(end - start, bm, 128, bn, 128)
-        scale = blocks.abs().amax(dim=(2, 4), keepdim=True).clamp(min=1e-8) / 448.0
-        q_out[start:end] = (blocks / scale).clamp(-448.0, 448.0).to(torch.float8_e4m3fn).reshape(end - start, m, n)
-        s_out[start:end] = scale.squeeze(4).squeeze(2)
-    return q_out, s_out
-
-
-def pack_prog8_224_chunked(w: torch.Tensor, chunk_e: int = 32):
-    """O9: Chunked 2+2+4 bitplane packing with 128B cache-line blocks (block_d=512 for 2-bit, 256 for 4-bit)."""
-    e, m, n = w.shape
-    hi2_p = torch.empty((e, m, n // 4), dtype=torch.uint8, device=w.device)
-    mid2_p = torch.empty((e, m, n // 4), dtype=torch.uint8, device=w.device)
-    lo4_p = torch.empty((e, m, n // 2), dtype=torch.uint8, device=w.device)
-    scales = torch.empty((e, m), dtype=torch.float32, device=w.device)
-    for start in range(0, e, chunk_e):
-        end = min(e, start + chunk_e)
-        hi2, mid2, lo4, sc = quantize_prog8_224(w[start:end], group_size=None)
-        hi2_p[start:end] = pack_2bit_interleaved(hi2, signed=True, block_d=512)
-        mid2_p[start:end] = pack_2bit_interleaved(mid2, signed=False, block_d=512)
-        lo4_p[start:end] = pack_4bit_interleaved(lo4, block_d=256)
-        scales[start:end] = sc.squeeze(-1)
-    return hi2_p, mid2_p, lo4_p, scales
-
-
-def bench_cuda_graph_l2_flushed(
-    fn, warmup: int = 8, iters: int = 50, l2_flush_mb: int = 192, require_graph: bool = True
-) -> float:
-    flush_buf = torch.empty((l2_flush_mb * 1024 * 1024 // 4,), dtype=torch.int32, device="cuda")
-    s = torch.cuda.Stream()
-    s.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(s):
-        for _ in range(warmup):
-            fn()
-    torch.cuda.current_stream().wait_stream(s)
-    torch.cuda.synchronize()
-
-    runner = fn
-    try:
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            fn()
-        torch.cuda.synchronize()
-        runner = g.replay
-    except RuntimeError:
-        if require_graph:
-            raise
-
-    times_ms = []
-    for _ in range(iters):
-        flush_buf.zero_()
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        runner()
-        end.record()
-        torch.cuda.synchronize()
-        times_ms.append(start.elapsed_time(end))
-    times_ms.sort()
-    return times_ms[len(times_ms) // 2] * 1000.0
-
-
-def sample_zipf_routing(b: int, num_experts: int, top_k: int, alpha: float, device: torch.device) -> torch.Tensor:
-    ranks = torch.arange(1, num_experts + 1, device=device, dtype=torch.float32)
-    probs = ranks.pow(-alpha)
-    probs = probs / probs.sum()
-    u = torch.rand((b, num_experts), device=device).clamp(min=1e-7)
-    keys = torch.log(probs)[None, :] - torch.log(-torch.log(u))
-    return torch.topk(keys, k=top_k, dim=-1).indices
 
 
 def run_benchmark(

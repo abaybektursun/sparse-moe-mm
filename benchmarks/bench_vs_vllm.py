@@ -25,17 +25,10 @@ from vllm.model_executor.layers.fused_moe.fused_moe import fused_experts
 from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import TopKWeightAndReduceNoOP
 from vllm.plugins import load_general_plugins
 
-from benchmarks.bench_layer import (
+from benchmarks._utils import (
     bench_cuda_graph_l2_flushed,
-    pack_prog8_224_chunked,
     quantize_fp8_block128_hw_chunked,
     sample_zipf_routing,
-)
-from sparse_moe_mm.kernels import (
-    launch_dense_fp8_grouped_mm,
-    launch_prog8_224_stage1,
-    launch_prog8_224_stage2,
-    launch_svd_recovery,
 )
 from sparse_moe_mm.reference import dense_moe_swiglu_ref
 from sparse_moe_mm.roofline import MODELS
