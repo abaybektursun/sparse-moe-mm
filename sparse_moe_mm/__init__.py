@@ -32,7 +32,9 @@ from sparse_moe_mm.vllm_plugin import (
     Prog8MoEConfig,
     Prog8SparseMoEExperts,
     pack_hf_fp8_experts,
+    prepare_fp8_moe_layer_for_prog8,
     register,
+    should_enable_prog8_sparse,
 )
 
 __all__ = [
@@ -54,6 +56,7 @@ __all__ = [
     "dequantize_prog8_dual_2_6",
     "layer_time_us",
     "pack_hf_fp8_experts",
+    "prepare_fp8_moe_layer_for_prog8",
     "prog8_sparse_moe_ref",
     "proxy_gated_sparse_moe_ref",
     "quantize_fp8_block128",
@@ -63,5 +66,6 @@ __all__ = [
     "quantize_prog8_dual_2_6",
     "quantize_ternary_2bit",
     "register",
+    "should_enable_prog8_sparse",
     "sparse_moe_swiglu_ref",
 ]

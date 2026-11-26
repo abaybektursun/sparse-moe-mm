@@ -8,7 +8,9 @@ from sparse_moe_mm.vllm_plugin import (
     Prog8MoEConfig,
     Prog8SparseMoEExperts,
     pack_hf_fp8_experts,
+    prepare_fp8_moe_layer_for_prog8,
     register,
+    should_enable_prog8_sparse,
 )
 
 
@@ -151,4 +153,66 @@ def test_hybrid_layer_policy_and_plugin_registration():
         M=16, N=128, K=128, topk=4, global_num_experts=4, local_num_experts=4
     )
     assert ws13 == (64, 128) and ws2 == (64, 128) and out_s == (16, 128)
-    assert experts.finalize_weight_and_reduce_impl() == "noop"
+    fin = experts.finalize_weight_and_reduce_impl()
+    from sparse_moe_mm.vllm_plugin import HAS_VLLM
+
+    if HAS_VLLM:
+        assert type(fin).__name__ == "TopKWeightAndReduceNoOP"
+    else:
+        assert fin == "noop"
+
+
+def test_expert_parallel_expert_map_and_layer_prepare_helper():
+    """Verify vLLM EP expert_map (-1 non-local experts) & prepare_fp8_moe_layer_for_prog8."""
+    # Global E=6, local rank owns experts {0, 2, 4} -> local IDs {0, 1, 2}; {1, 3, 5} -> -1
+    w13_loc, wg_loc, wu_loc, wd_loc = _make_vllm_moe_weights(e=3, d_model=128, d_ff=128, seed=77)
+    expert_map = torch.tensor([0, -1, 1, -1, 2, -1], dtype=torch.int32)
+
+    class DummyMoELayer(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.w13_weight = torch.nn.Parameter(w13_loc.clone(), requires_grad=False)
+            self.w2_weight = torch.nn.Parameter(wd_loc.clone(), requires_grad=False)
+
+    layer = DummyMoELayer()
+    cfg = Prog8MoEConfig(sparsity=0.0, svd_rank=0, cold_me_thresh=8)
+    experts = prepare_fp8_moe_layer_for_prog8(layer, config=cfg, free_dense_w13=True)
+    assert layer.w13_weight is None  # Strict 0% duplicate w13 VRAM!
+    assert experts.weights.w_gate_fp8 is None and experts.weights.w_up_fp8 is None
+
+    g = torch.Generator().manual_seed(99)
+    b = 7  # Odd batch size edge case
+    x = torch.randn((b, 128), generator=g)
+    topk_ids = torch.tensor([[0, 1], [2, 3], [4, 5], [1, 3], [0, 4], [5, 2], [3, 1]], dtype=torch.long)
+    topk_weights = torch.full((b, 2), 0.5)
+
+    out = torch.empty_like(x)
+    experts.apply(out, x, None, None, topk_weights, topk_ids, global_num_experts=6, expert_map=expert_map)
+
+    # Exact reference: only local experts {0->0, 2->1, 4->2} contribute; tokens [3] and [6] have 0 local hits!
+    ref = torch.zeros_like(x)
+    for t in range(b):
+        for s in range(2):
+            loc_e = int(expert_map[topk_ids[t, s]].item())
+            if loc_e >= 0:
+                h = torch.nn.functional.silu(wg_loc[loc_e] @ x[t]) * (wu_loc[loc_e] @ x[t])
+                ref[t] += topk_weights[t, s] * (wd_loc[loc_e] @ h)
+
+    assert float(out[3].abs().max().item()) == 0.0
+    assert float(out[6].abs().max().item()) == 0.0
+    rel_err = float((out - ref).norm() / ref.norm())
+    assert rel_err < 0.02, f"EP expert_map rel_err={rel_err:.4f}"
+
+
+def test_oracle_dispatch_predicate_across_gpus():
+    """Verify hardware-calibrated vLLM oracle predicate activates only in winning regimes."""
+    # L40S (614 GB/s): 35B active at B=16..128, disabled at B=256 (dense regime)
+    assert should_enable_prog8_sparse(64, 256, 2048, 512, hw_mem_bw_gbs=614.0) is True
+    assert should_enable_prog8_sparse(256, 256, 2048, 512, hw_mem_bw_gbs=614.0) is False
+    # H200 (3,894 GB/s): 35B excluded (<180us dense!), 122B & DeepSeek-V3 enabled at B=16..128!
+    assert should_enable_prog8_sparse(64, 256, 2048, 512, hw_mem_bw_gbs=3894.0) is False
+    assert should_enable_prog8_sparse(32, 256, 3072, 1024, hw_mem_bw_gbs=3894.0) is True
+    assert should_enable_prog8_sparse(32, 256, 7168, 2048, hw_mem_bw_gbs=3894.0) is True
+    assert should_enable_prog8_sparse(1, 256, 7168, 2048, hw_mem_bw_gbs=3894.0) is False  # 127us -> opt-in or >=180us
+    # Non-512-aligned d_model cleanly rejected
+    assert should_enable_prog8_sparse(64, 256, 768, 512, hw_mem_bw_gbs=614.0) is False
