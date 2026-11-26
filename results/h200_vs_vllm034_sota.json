@@ -1,0 +1,482 @@
+{
+  "gpu": "NVIDIA H200 NVL",
+  "sm_count": 132,
+  "vram_gib": 139.8,
+  "d2d_ceiling_gbs": 3894.3,
+  "vllm_version": "0.34.0",
+  "torch_version": "2.14.0+cu130",
+  "live_gpu_plugin_q1_rel_l2": 0.0392,
+  "live_gpu_ep_map_rel_l2": 0.039,
+  "full_apply_cuda_graph_captured": true,
+  "strict_zero_duplicate_w13": true,
+  "models": [
+    {
+      "model": "Qwen3.5/3.6-35B-A3B",
+      "E": 256,
+      "k": 8,
+      "d_model": 2048,
+      "d_ff": 512,
+      "vram_overhead_pct": 2.72,
+      "baselines_found": [
+        "vllm_triton_fp8"
+      ],
+      "baseline_diag": {
+        "_deepgemm_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'",
+        "_flashinfer_cutlass_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'",
+        "_vllm_cutlass_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'"
+      },
+      "results": {
+        "s75": [
+          {
+            "B": 1,
+            "E_act": 8,
+            "baselines_us": {
+              "vllm_triton_fp8": 31.0
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 31.0,
+            "fastest_baseline_bw_gbs": 811.8,
+            "ours_full_apply_us": 44.2,
+            "speedup_vs_triton": 0.7,
+            "speedup_vs_fastest_vllm": 0.7
+          },
+          {
+            "B": 16,
+            "E_act": 78,
+            "baselines_us": {
+              "vllm_triton_fp8": 100.0
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 100.0,
+            "fastest_baseline_bw_gbs": 2453.7,
+            "ours_full_apply_us": 120.5,
+            "speedup_vs_triton": 0.83,
+            "speedup_vs_fastest_vllm": 0.83
+          },
+          {
+            "B": 32,
+            "E_act": 112,
+            "baselines_us": {
+              "vllm_triton_fp8": 123.6
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 123.6,
+            "fastest_baseline_bw_gbs": 2850.5,
+            "ours_full_apply_us": 163.7,
+            "speedup_vs_triton": 0.75,
+            "speedup_vs_fastest_vllm": 0.75
+          },
+          {
+            "B": 64,
+            "E_act": 181,
+            "baselines_us": {
+              "vllm_triton_fp8": 175.4
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 175.4,
+            "fastest_baseline_bw_gbs": 3246.2,
+            "ours_full_apply_us": 212.1,
+            "speedup_vs_triton": 0.83,
+            "speedup_vs_fastest_vllm": 0.83
+          },
+          {
+            "B": 128,
+            "E_act": 227,
+            "baselines_us": {
+              "vllm_triton_fp8": 212.9
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 212.9,
+            "fastest_baseline_bw_gbs": 3354.1,
+            "ours_full_apply_us": 296.5,
+            "speedup_vs_triton": 0.72,
+            "speedup_vs_fastest_vllm": 0.72
+          }
+        ],
+        "s80": [
+          {
+            "B": 1,
+            "E_act": 8,
+            "baselines_us": {
+              "vllm_triton_fp8": 31.0
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 31.0,
+            "fastest_baseline_bw_gbs": 811.8,
+            "ours_full_apply_us": 43.8,
+            "speedup_vs_triton": 0.71,
+            "speedup_vs_fastest_vllm": 0.71
+          },
+          {
+            "B": 16,
+            "E_act": 78,
+            "baselines_us": {
+              "vllm_triton_fp8": 100.0
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 100.0,
+            "fastest_baseline_bw_gbs": 2453.7,
+            "ours_full_apply_us": 117.8,
+            "speedup_vs_triton": 0.85,
+            "speedup_vs_fastest_vllm": 0.85
+          },
+          {
+            "B": 32,
+            "E_act": 112,
+            "baselines_us": {
+              "vllm_triton_fp8": 123.6
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 123.6,
+            "fastest_baseline_bw_gbs": 2850.5,
+            "ours_full_apply_us": 145.5,
+            "speedup_vs_triton": 0.85,
+            "speedup_vs_fastest_vllm": 0.85
+          },
+          {
+            "B": 64,
+            "E_act": 181,
+            "baselines_us": {
+              "vllm_triton_fp8": 175.4
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 175.4,
+            "fastest_baseline_bw_gbs": 3246.2,
+            "ours_full_apply_us": 215.0,
+            "speedup_vs_triton": 0.82,
+            "speedup_vs_fastest_vllm": 0.82
+          },
+          {
+            "B": 128,
+            "E_act": 227,
+            "baselines_us": {
+              "vllm_triton_fp8": 212.9
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 212.9,
+            "fastest_baseline_bw_gbs": 3354.1,
+            "ours_full_apply_us": 309.8,
+            "speedup_vs_triton": 0.69,
+            "speedup_vs_fastest_vllm": 0.69
+          }
+        ]
+      }
+    },
+    {
+      "model": "Qwen3.5-122B-A10B",
+      "E": 256,
+      "k": 8,
+      "d_model": 3072,
+      "d_ff": 1024,
+      "vram_overhead_pct": 1.46,
+      "baselines_found": [
+        "vllm_triton_fp8"
+      ],
+      "baseline_diag": {
+        "_deepgemm_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'",
+        "_flashinfer_cutlass_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'",
+        "_vllm_cutlass_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'"
+      },
+      "results": {
+        "s80": [
+          {
+            "B": 1,
+            "E_act": 8,
+            "baselines_us": {
+              "vllm_triton_fp8": 49.1
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 49.1,
+            "fastest_baseline_bw_gbs": 1537.6,
+            "ours_full_apply_us": 62.7,
+            "speedup_vs_triton": 0.78,
+            "speedup_vs_fastest_vllm": 0.78
+          },
+          {
+            "B": 16,
+            "E_act": 82,
+            "baselines_us": {
+              "vllm_triton_fp8": 222.3
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 222.3,
+            "fastest_baseline_bw_gbs": 3481.1,
+            "ours_full_apply_us": 200.6,
+            "speedup_vs_triton": 1.11,
+            "speedup_vs_fastest_vllm": 1.11
+          },
+          {
+            "B": 32,
+            "E_act": 123,
+            "baselines_us": {
+              "vllm_triton_fp8": 312.8
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 312.8,
+            "fastest_baseline_bw_gbs": 3710.9,
+            "ours_full_apply_us": 278.0,
+            "speedup_vs_triton": 1.12,
+            "speedup_vs_fastest_vllm": 1.12
+          },
+          {
+            "B": 64,
+            "E_act": 172,
+            "baselines_us": {
+              "vllm_triton_fp8": 428.5
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 428.5,
+            "fastest_baseline_bw_gbs": 3788.1,
+            "ours_full_apply_us": 413.3,
+            "speedup_vs_triton": 1.04,
+            "speedup_vs_fastest_vllm": 1.04
+          },
+          {
+            "B": 128,
+            "E_act": 231,
+            "baselines_us": {
+              "vllm_triton_fp8": 588.9
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 588.9,
+            "fastest_baseline_bw_gbs": 3701.8,
+            "ours_full_apply_us": 615.8,
+            "speedup_vs_triton": 0.96,
+            "speedup_vs_fastest_vllm": 0.96
+          }
+        ],
+        "s85": [
+          {
+            "B": 1,
+            "E_act": 8,
+            "baselines_us": {
+              "vllm_triton_fp8": 49.1
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 49.1,
+            "fastest_baseline_bw_gbs": 1537.6,
+            "ours_full_apply_us": 60.7,
+            "speedup_vs_triton": 0.81,
+            "speedup_vs_fastest_vllm": 0.81
+          },
+          {
+            "B": 16,
+            "E_act": 82,
+            "baselines_us": {
+              "vllm_triton_fp8": 222.3
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 222.3,
+            "fastest_baseline_bw_gbs": 3481.1,
+            "ours_full_apply_us": 181.8,
+            "speedup_vs_triton": 1.22,
+            "speedup_vs_fastest_vllm": 1.22
+          },
+          {
+            "B": 32,
+            "E_act": 123,
+            "baselines_us": {
+              "vllm_triton_fp8": 312.8
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 312.8,
+            "fastest_baseline_bw_gbs": 3710.9,
+            "ours_full_apply_us": 256.3,
+            "speedup_vs_triton": 1.22,
+            "speedup_vs_fastest_vllm": 1.22
+          },
+          {
+            "B": 64,
+            "E_act": 172,
+            "baselines_us": {
+              "vllm_triton_fp8": 428.5
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 428.5,
+            "fastest_baseline_bw_gbs": 3788.1,
+            "ours_full_apply_us": 378.6,
+            "speedup_vs_triton": 1.13,
+            "speedup_vs_fastest_vllm": 1.13
+          },
+          {
+            "B": 128,
+            "E_act": 231,
+            "baselines_us": {
+              "vllm_triton_fp8": 588.9
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 588.9,
+            "fastest_baseline_bw_gbs": 3701.8,
+            "ours_full_apply_us": 580.4,
+            "speedup_vs_triton": 1.01,
+            "speedup_vs_fastest_vllm": 1.01
+          }
+        ]
+      }
+    },
+    {
+      "model": "DeepSeek-V3-671B",
+      "E": 256,
+      "k": 8,
+      "d_model": 7168,
+      "d_ff": 2048,
+      "vram_overhead_pct": 0.69,
+      "baselines_found": [
+        "vllm_triton_fp8"
+      ],
+      "baseline_diag": {
+        "_deepgemm_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'",
+        "_flashinfer_cutlass_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'",
+        "_vllm_cutlass_err": "TypeError: make_fp8_moe_kernel() missing 1 required positional argument: 'experts_cls'"
+      },
+      "results": {
+        "s80": [
+          {
+            "B": 1,
+            "E_act": 8,
+            "baselines_us": {
+              "vllm_triton_fp8": 127.4
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 127.4,
+            "fastest_baseline_bw_gbs": 2765.5,
+            "ours_full_apply_us": 121.2,
+            "speedup_vs_triton": 1.05,
+            "speedup_vs_fastest_vllm": 1.05
+          },
+          {
+            "B": 16,
+            "E_act": 75,
+            "baselines_us": {
+              "vllm_triton_fp8": 816.0
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 816.0,
+            "fastest_baseline_bw_gbs": 4047.8,
+            "ours_full_apply_us": 535.1,
+            "speedup_vs_triton": 1.52,
+            "speedup_vs_fastest_vllm": 1.52
+          },
+          {
+            "B": 32,
+            "E_act": 126,
+            "baselines_us": {
+              "vllm_triton_fp8": 1346.3
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 1346.3,
+            "fastest_baseline_bw_gbs": 4121.7,
+            "ours_full_apply_us": 799.5,
+            "speedup_vs_triton": 1.68,
+            "speedup_vs_fastest_vllm": 1.68
+          },
+          {
+            "B": 64,
+            "E_act": 184,
+            "baselines_us": {
+              "vllm_triton_fp8": 1962.7
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 1962.7,
+            "fastest_baseline_bw_gbs": 4128.7,
+            "ours_full_apply_us": 1366.7,
+            "speedup_vs_triton": 1.44,
+            "speedup_vs_fastest_vllm": 1.44
+          },
+          {
+            "B": 128,
+            "E_act": 220,
+            "baselines_us": {
+              "vllm_triton_fp8": 2521.4
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 2521.4,
+            "fastest_baseline_bw_gbs": 3842.6,
+            "ours_full_apply_us": 2282.1,
+            "speedup_vs_triton": 1.1,
+            "speedup_vs_fastest_vllm": 1.1
+          }
+        ],
+        "s85": [
+          {
+            "B": 1,
+            "E_act": 8,
+            "baselines_us": {
+              "vllm_triton_fp8": 127.4
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 127.4,
+            "fastest_baseline_bw_gbs": 2765.5,
+            "ours_full_apply_us": 114.9,
+            "speedup_vs_triton": 1.11,
+            "speedup_vs_fastest_vllm": 1.11
+          },
+          {
+            "B": 16,
+            "E_act": 75,
+            "baselines_us": {
+              "vllm_triton_fp8": 816.0
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 816.0,
+            "fastest_baseline_bw_gbs": 4047.8,
+            "ours_full_apply_us": 476.4,
+            "speedup_vs_triton": 1.71,
+            "speedup_vs_fastest_vllm": 1.71
+          },
+          {
+            "B": 32,
+            "E_act": 126,
+            "baselines_us": {
+              "vllm_triton_fp8": 1346.3
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 1346.3,
+            "fastest_baseline_bw_gbs": 4121.7,
+            "ours_full_apply_us": 778.4,
+            "speedup_vs_triton": 1.73,
+            "speedup_vs_fastest_vllm": 1.73
+          },
+          {
+            "B": 64,
+            "E_act": 184,
+            "baselines_us": {
+              "vllm_triton_fp8": 1962.7
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 1962.7,
+            "fastest_baseline_bw_gbs": 4128.7,
+            "ours_full_apply_us": 1285.7,
+            "speedup_vs_triton": 1.53,
+            "speedup_vs_fastest_vllm": 1.53
+          },
+          {
+            "B": 128,
+            "E_act": 220,
+            "baselines_us": {
+              "vllm_triton_fp8": 2521.4
+            },
+            "fastest_baseline": "vllm_triton_fp8",
+            "fastest_baseline_us": 2521.4,
+            "fastest_baseline_bw_gbs": 3842.6,
+            "ours_full_apply_us": 2048.3,
+            "speedup_vs_triton": 1.23,
+            "speedup_vs_fastest_vllm": 1.23
+          }
+        ]
+      }
+    }
+  ],
+  "live_122b_vram_fit_proof": {
+    "gpu_total_gib": 139.81,
+    "prog8_svd16_48l_allocated_gib": 113.83,
+    "prog8_svd16_48l_reserved_gib": 113.94,
+    "kv_cache_headroom_gib": 25.98,
+    "fits_single_h200": true,
+    "moe_base_gib": 108.0,
+    "tern8_proxy_gib": 131.83,
+    "tern8_oom_on_h200": false,
+    "proxsparse_proxy_gib": 149.83,
+    "proxsparse_oom_on_h200": true
+  }
+}

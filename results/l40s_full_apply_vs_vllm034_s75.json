@@ -1,0 +1,53 @@
+{
+  "gpu": "NVIDIA L40S",
+  "vllm_version": "0.34.0",
+  "torch_version": "2.14.0+cu130",
+  "sparsity": 0.75,
+  "vram_overhead_pct": 2.72,
+  "live_gpu_plugin_q1_rel_l2": 0.0122,
+  "live_gpu_ep_map_rel_l2": 0.0123,
+  "full_apply_cuda_graph_captured": true,
+  "strict_zero_duplicate_w13": true,
+  "records": [
+    {
+      "B": 1,
+      "E_act": 8,
+      "vllm_fp8_us": 69.6,
+      "vllm_bw_gbs": 361.4,
+      "ours_full_apply_us": 70.7,
+      "speedup_vs_vllm": 0.99
+    },
+    {
+      "B": 16,
+      "E_act": 76,
+      "vllm_fp8_us": 487.4,
+      "vllm_bw_gbs": 490.5,
+      "ours_full_apply_us": 306.2,
+      "speedup_vs_vllm": 1.59
+    },
+    {
+      "B": 32,
+      "E_act": 129,
+      "vllm_fp8_us": 741.4,
+      "vllm_bw_gbs": 547.4,
+      "ours_full_apply_us": 468.0,
+      "speedup_vs_vllm": 1.58
+    },
+    {
+      "B": 64,
+      "E_act": 184,
+      "vllm_fp8_us": 997.4,
+      "vllm_bw_gbs": 580.3,
+      "ours_full_apply_us": 656.4,
+      "speedup_vs_vllm": 1.52
+    },
+    {
+      "B": 128,
+      "E_act": 218,
+      "vllm_fp8_us": 1164.3,
+      "vllm_bw_gbs": 589.0,
+      "ours_full_apply_us": 856.1,
+      "speedup_vs_vllm": 1.36
+    }
+  ]
+}

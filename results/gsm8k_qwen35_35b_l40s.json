@@ -1,0 +1,87 @@
+{
+  "model": "Qwen/Qwen3.5-35B-A3B-FP8",
+  "gpu": "NVIDIA L40S",
+  "live_triton_kernel": true,
+  "strict_zero_duplicate_w13": true,
+  "vram_dense_gib": 34.09,
+  "vram_prog8_svd16_gib": 35.66,
+  "dense_fp8": {
+    "n": 64,
+    "correct": 48,
+    "accuracy_pct": 75.0,
+    "repetition_loops": 0,
+    "elapsed_s": 202.8,
+    "samples": [
+      {
+        "q": "Janet\u2019s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes mu",
+        "gold": "18",
+        "pred": "18",
+        "ok": true
+      },
+      {
+        "q": "A robe takes 2 bolts of blue fiber and half that much white fiber.  How many bolts in tota",
+        "gold": "3",
+        "pred": "3",
+        "ok": true
+      },
+      {
+        "q": "Josh decides to try flipping a house.  He buys a house for $80,000 and then puts in $50,00",
+        "gold": "70000",
+        "pred": "7",
+        "ok": false
+      },
+      {
+        "q": "James decides to run 3 sprints 3 times a week.  He runs 60 meters each sprint.  How many t",
+        "gold": "540",
+        "pred": "540",
+        "ok": true
+      },
+      {
+        "q": "Every day, Wendi feeds each of her chickens three cups of mixed chicken feed, containing s",
+        "gold": "20",
+        "pred": "20",
+        "ok": true
+      }
+    ]
+  },
+  "hybrid_dn80_fa70_svd16_live_triton": {
+    "n": 64,
+    "correct": 51,
+    "accuracy_pct": 79.69,
+    "repetition_loops": 0,
+    "elapsed_s": 231.1,
+    "samples": [
+      {
+        "q": "Janet\u2019s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes mu",
+        "gold": "18",
+        "pred": "18",
+        "ok": true
+      },
+      {
+        "q": "A robe takes 2 bolts of blue fiber and half that much white fiber.  How many bolts in tota",
+        "gold": "3",
+        "pred": "3",
+        "ok": true
+      },
+      {
+        "q": "Josh decides to try flipping a house.  He buys a house for $80,000 and then puts in $50,00",
+        "gold": "70000",
+        "pred": "4",
+        "ok": false
+      },
+      {
+        "q": "James decides to run 3 sprints 3 times a week.  He runs 60 meters each sprint.  How many t",
+        "gold": "540",
+        "pred": "540",
+        "ok": true
+      },
+      {
+        "q": "Every day, Wendi feeds each of her chickens three cups of mixed chicken feed, containing s",
+        "gold": "20",
+        "pred": "20",
+        "ok": true
+      }
+    ]
+  },
+  "relative_retention_pct": 106.25
+}

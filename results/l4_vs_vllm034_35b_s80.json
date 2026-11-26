@@ -1,0 +1,49 @@
+{
+  "gpu": "NVIDIA L4",
+  "vllm_version": "0.34.0",
+  "torch_version": "2.14.0+cu130",
+  "sparsity": 0.8,
+  "live_gpu_plugin_q1_rel_l2": 0.0126,
+  "records": [
+    {
+      "B": 1,
+      "E_act": 8,
+      "K_u": 96,
+      "vllm_fp8_us": 165.9,
+      "ours_3tier_svd_us": 106.5,
+      "speedup_vs_vllm": 1.56
+    },
+    {
+      "B": 16,
+      "E_act": 81,
+      "K_u": 128,
+      "vllm_fp8_us": 1231.9,
+      "ours_3tier_svd_us": 612.4,
+      "speedup_vs_vllm": 2.01
+    },
+    {
+      "B": 32,
+      "E_act": 129,
+      "K_u": 160,
+      "vllm_fp8_us": 1881.1,
+      "ours_3tier_svd_us": 937.0,
+      "speedup_vs_vllm": 2.01
+    },
+    {
+      "B": 64,
+      "E_act": 172,
+      "K_u": 176,
+      "vllm_fp8_us": 2463.7,
+      "ours_3tier_svd_us": 1281.0,
+      "speedup_vs_vllm": 1.92
+    },
+    {
+      "B": 128,
+      "E_act": 218,
+      "K_u": 224,
+      "vllm_fp8_us": 3103.7,
+      "ours_3tier_svd_us": 1857.5,
+      "speedup_vs_vllm": 1.67
+    }
+  ]
+}
