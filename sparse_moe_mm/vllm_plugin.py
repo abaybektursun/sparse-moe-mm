@@ -42,27 +42,49 @@ try:
 except ImportError:  # pragma: no cover
     HAS_TRITON = False
 
-try:  # Optional vLLM integration — falls back cleanly when vLLM is not installed
+try:  # Optional vLLM v0.34+ integration — falls back cleanly when vLLM is not installed
     import vllm.model_executor.layers.fused_moe.modular_kernel as _vllm_mk
+    from vllm.model_executor.layers.fused_moe.activation import MoEActivation as _VllmMoEActivation
+    from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
+        TopKWeightAndReduceNoOP as _VllmTopKWeightAndReduceNoOP,
+    )
+    from vllm.model_executor.layers.quantization.utils.quant_utils import (
+        kFp8Dynamic128Sym as _kFp8Dynamic128Sym,
+        kFp8Static128BlockSym as _kFp8Static128BlockSym,
+    )
+    from vllm.platforms import current_platform as _vllm_platform
 
-    _BASE_EXPERTS_CLS = getattr(_vllm_mk, "FusedMoEExpertsModular", object)
+    _BASE_EXPERTS_CLS = _vllm_mk.FusedMoEExpertsModular
     HAS_VLLM = True
 except ImportError:
     _vllm_mk = None
+    _VllmMoEActivation = None
+    _VllmTopKWeightAndReduceNoOP = None
+    _kFp8Dynamic128Sym = None
+    _kFp8Static128BlockSym = None
+    _vllm_platform = None
     _BASE_EXPERTS_CLS = object
     HAS_VLLM = False
 
 
 @dataclass(frozen=True)
 class Prog8MoEConfig:
-    """Configuration for Cold-Expert-Only Prog8-Dual (2+2+4) + SVD-r16 MoE execution."""
+    """Configuration for Cold-Expert-Only Prog8-Dual (2+2+4) + SVD-r16 MoE execution.
+
+    Defaults reflect the empirically optimal Phase-0c hybrid policy on Qwen3.5-35B-A3B-FP8:
+      - DeltaNet / standard MoE layers: `s=0.80`, 3-Tier `8b/4b` (`+0.68%` ΔPPL combined!)
+      - Full-Attention MoE layers: `s=0.70`, exact 8-bit `2+2+4` (`full_attn_use_3tier=False`)
+      - Hot experts (`M_e > 8`): 100% exact dense
+      - Dropped cold neurons: calibration-free weight-only `SVD-r16`
+    """
 
     sparsity: float = 0.80
-    full_attn_sparsity: float = 0.70  # Tighter sparsity on Full-Attn layers (Phase-0b finding)
+    full_attn_sparsity: float = 0.70  # Phase-0c optimal Full-Attn sparsity (+0.68% dPPL combined)
     cold_me_thresh: int = 8  # Experts with M_e <= 8 run sparse; M_e > 8 run 100% exact dense
     svd_rank: int = 16  # 0 disables SVD recovery (strict 0.00% extra VRAM)
-    use_3tier: bool = False  # Tier-1 (8-bit) + Tier-2 (4-bit, skips lo4) + Tier-3 (SVD-r16)
-    tier1_frac: float = 0.50  # Fraction of K_u kept at full 8-bit when use_3tier=True
+    use_3tier: bool = True  # Tier-1 (8-bit) + Tier-2 (4-bit, skips lo4) + Tier-3 (SVD-r16)
+    full_attn_use_3tier: bool = False  # Keep Full-Attn layers at exact 8-bit Stage-2
+    tier1_frac: float = 0.50  # Fraction of K_u kept at full 8-bit when 3-Tier is active
     corr_out: float = 0.24  # Measured Qwen3.5 neuron co-activation correlation for K_u sizing
     max_me_cold: int = 16
     block_d_2bit: int = 512  # 128B cache-line-exact packing for GPU O9 kernels
@@ -73,6 +95,11 @@ class Prog8MoEConfig:
         if layer_type == "full_attn":
             return self.full_attn_sparsity
         return self.sparsity
+
+    def effective_use_3tier(self, layer_type: str = "deltanet") -> bool:
+        if layer_type == "full_attn":
+            return self.full_attn_use_3tier
+        return self.use_3tier
 
     def compute_k_u(self, d_ff: int, cold_me_avg: float, layer_type: str = "deltanet") -> int:
         s = self.effective_sparsity(layer_type)
@@ -293,22 +320,68 @@ def _reconstruct_expert_224(
 
 
 class Prog8SparseMoEExperts(_BASE_EXPERTS_CLS):
-    """Drop-in vLLM `FusedMoEExpertsModular` backend for Cold-Expert-Only `Prog8-Dual (2+2+4)`."""
+    """Drop-in vLLM v0.34+ `FusedMoEExpertsModular` backend for Cold-Expert-Only `Prog8-Dual (2+2+4)`."""
 
     def __init__(
         self,
         packed_weights: PackedProg8ExpertWeights,
         config: Prog8MoEConfig | None = None,
         layer_type: str = "deltanet",
+        moe_config: Any = None,
+        quant_config: Any = None,
     ) -> None:
-        if HAS_VLLM and _BASE_EXPERTS_CLS is not object:
-            try:
-                super().__init__()
-            except TypeError:
-                pass
+        if HAS_VLLM and _BASE_EXPERTS_CLS is not object and moe_config is not None and quant_config is not None:
+            super().__init__(moe_config, quant_config)
         self.weights = packed_weights
         self.config = config or Prog8MoEConfig()
         self.layer_type = layer_type
+
+    @staticmethod
+    def activation_format() -> Any:
+        if HAS_VLLM and _vllm_mk is not None:
+            return _vllm_mk.FusedMoEActivationFormat.Standard
+        return "standard"
+
+    @property
+    def expects_unquantized_inputs(self) -> bool:
+        """Stage-1/Stage-2 kernels consume BF16/FP16 hidden states directly."""
+        return True
+
+    @staticmethod
+    def _supports_current_device() -> bool:
+        if HAS_VLLM and _vllm_platform is not None:
+            return bool(_vllm_platform.is_cuda())
+        return torch.cuda.is_available()
+
+    @staticmethod
+    def _supports_no_act_and_mul() -> bool:
+        return False
+
+    @staticmethod
+    def _supports_quant_scheme(weight_key: Any, activation_key: Any) -> bool:
+        if weight_key is None and activation_key is None:
+            return True
+        if HAS_VLLM and _kFp8Static128BlockSym is not None:
+            return (weight_key, activation_key) in (
+                (_kFp8Static128BlockSym, _kFp8Dynamic128Sym),
+                (_kFp8Static128BlockSym, None),
+            )
+        return False
+
+    @staticmethod
+    def _supports_activation(activation: Any) -> bool:
+        if HAS_VLLM and _VllmMoEActivation is not None:
+            return activation == _VllmMoEActivation.SILU
+        return str(activation).lower() in ("silu", "swiglu")
+
+    @staticmethod
+    def _supports_parallel_config(moe_parallel_config: Any) -> bool:
+        if moe_parallel_config is None:
+            return True
+        return not (
+            getattr(moe_parallel_config, "use_fi_nvl_two_sided_kernels", False)
+            or getattr(moe_parallel_config, "use_fi_nvl_one_sided_kernels", False)
+        )
 
     def _apply_cpu_reference(
         self,
@@ -439,10 +512,8 @@ class Prog8SparseMoEExperts(_BASE_EXPERTS_CLS):
         Since `apply()` already applies router weights and reduces across `topk` into `output`,
         returns `TopKWeightAndReduceNoOP` when running inside vLLM (or `"noop"` standalone).
         """
-        if HAS_VLLM and _vllm_mk is not None:
-            noop_cls = getattr(_vllm_mk, "TopKWeightAndReduceNoOP", None)
-            if noop_cls is not None:
-                return noop_cls()
+        if HAS_VLLM and _VllmTopKWeightAndReduceNoOP is not None:
+            return _VllmTopKWeightAndReduceNoOP()
         return "noop"
 
     def apply(
@@ -502,7 +573,8 @@ class Prog8SparseMoEExperts(_BASE_EXPERTS_CLS):
         cold_me_avg = float(cold_counts.float().mean().item()) if n_cold > 0 else 1.0
         k_u = cfg.compute_k_u(w.d_ff, cold_me_avg, layer_type=self.layer_type)
         # At tiny batch sizes (n_cold < 16), sorted=True TopK adds ~30 us launch cost; enable 3-Tier for n_cold >= 16
-        use_3tier_now = cfg.use_3tier and (n_cold >= 16) and (k_u >= 64)
+        layer_3tier = cfg.effective_use_3tier(self.layer_type)
+        use_3tier_now = layer_3tier and (n_cold >= 16) and (k_u >= 64)
         if use_3tier_now:
             k_full = min(k_u, max(64, int(round(k_u * cfg.tier1_frac / 64.0)) * 64))
         else:

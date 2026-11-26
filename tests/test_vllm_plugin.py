@@ -138,6 +138,8 @@ def test_hybrid_layer_policy_and_plugin_registration():
     assert cfg.compute_k_u(512, cold_me_avg=2.0, layer_type="full_attn") > cfg.compute_k_u(
         512, cold_me_avg=2.0, layer_type="deltanet"
     )
+    assert cfg.effective_use_3tier("deltanet") is True
+    assert cfg.effective_use_3tier("full_attn") is False
     register()
     assert PLUGIN_REGISTRY["prog8_sparse_fp8"] is Prog8SparseMoEExperts
 
