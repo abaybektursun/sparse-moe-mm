@@ -27,6 +27,13 @@ from sparse_moe_mm.roofline import (
     compute_roofline_table,
     layer_time_us,
 )
+from sparse_moe_mm.vllm_plugin import (
+    PackedProg8ExpertWeights,
+    Prog8MoEConfig,
+    Prog8SparseMoEExperts,
+    pack_hf_fp8_experts,
+    register,
+)
 
 __all__ = [
     "GPUS",
@@ -34,6 +41,9 @@ __all__ = [
     "MODELS",
     "MoEShape",
     "ModelSpec",
+    "PackedProg8ExpertWeights",
+    "Prog8MoEConfig",
+    "Prog8SparseMoEExperts",
     "apply_expert_permutation",
     "block_group_mask",
     "compute_coactivation_permutation",
@@ -43,6 +53,7 @@ __all__ = [
     "dequantize_prog8_4_4",
     "dequantize_prog8_dual_2_6",
     "layer_time_us",
+    "pack_hf_fp8_experts",
     "prog8_sparse_moe_ref",
     "proxy_gated_sparse_moe_ref",
     "quantize_fp8_block128",
@@ -51,5 +62,6 @@ __all__ = [
     "quantize_prog8_4_4",
     "quantize_prog8_dual_2_6",
     "quantize_ternary_2bit",
+    "register",
     "sparse_moe_swiglu_ref",
 ]

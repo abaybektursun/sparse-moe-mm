@@ -17,5 +17,8 @@ dependencies = [
 dev = ["pytest>=8.0"]
 gpu = ["triton>=3.2"]
 
+[project.entry-points."vllm.general_plugins"]
+prog8_sparse_fp8 = "sparse_moe_mm.vllm_plugin:register"
+
 [tool.setuptools.packages.find]
 include = ["sparse_moe_mm*"]

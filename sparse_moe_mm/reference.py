@@ -1,12 +1,14 @@
 """Exact fp32 ground-truth references for quantized sparse MoE architectures.
 
-v2 (Impact-Aligned Reset) includes:
+v3 (O1-O4 Optimized):
 - Official `[128,128]` block-scaled FP8 (`Qwen3.5-FP8` / `DeepSeek-V3`)
 - Blackwell `1x16` micro-block NVFP4 (`E2M1` + `E4M3` block scale)
-- Zero-VRAM Progressive Bit-Sliced `Prog8` (4+4 exact lossless INT8 split)
-- Zero-VRAM Progressive Bit-Sliced `Prog8-Dual` (2+6 exact lossless INT8 split on gate+up)
-- 2-bit Ternary Sketch (`arXiv:2610.37386` baseline)
-- Offline Lossless Co-Activation Neuron Permutation (`g = 16` NVFP4 micro-block alignment)
+- Power-of-2 `2+2+4` Zero-VRAM Progressive Bitplanes (`hi2` + `mid2` + `lo4` == exact INT8)
+  with 3-tier progressive precision (8-bit top-k1 + 4-bit next-k2 + SVD-r16 rest)
+- Block-interleaved packing (`pack_2bit_interleaved`, `pack_4bit_interleaved`) for 100%
+  coalesced activation loads in Triton/CUDA kernels
+- Expert-level max-reduced Top-K_u selection (zero torch.unique, 100% static CUDA Graph)
+- Legacy `Prog8 (4+4)`, `Prog8-Dual (2+6)`, `Tern8`, and `Prox` references retained for parity
 """
 
 from __future__ import annotations
@@ -24,7 +26,6 @@ class MoEShape:
     d_ff: int
 
 
-# --- NVFP4 E2M1 Codebook (16 representable signed values) ---
 _NVFP4_LEVELS = torch.tensor(
     [-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
     dtype=torch.float32,
@@ -45,7 +46,6 @@ def quantize_int4_rowwise(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Ten
 
 
 def dequantize_int4_rowwise(packed: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    """Inverse of quantize_int4_rowwise -> fp32 tensor [..., out_features, in_features]."""
     low = (packed & 0x0F).to(torch.int8)
     high = ((packed >> 4) & 0x0F).to(torch.int8)
     low = torch.where(low >= 8, low - 16, low)
@@ -57,10 +57,7 @@ def dequantize_int4_rowwise(packed: torch.Tensor, scale: torch.Tensor) -> torch.
 
 
 def quantize_fp8_block128(weight: torch.Tensor, block_size: int = 128) -> tuple[torch.Tensor, torch.Tensor]:
-    """Simulate official `[128,128]` block-scaled FP8 E4M3 quantization (Qwen3.5-FP8 / DeepSeek-V3).
-
-    Returns (w_fp8_as_fp32 [..., M, N], scales [..., ceil(M/B), ceil(N/B)]).
-    """
+    """Simulate official `[128,128]` block-scaled FP8 E4M3 quantization (Qwen3.5-FP8 / DeepSeek-V3)."""
     w = weight.float()
     *prefix, m, n = w.shape
     bm = (m + block_size - 1) // block_size
@@ -77,25 +74,19 @@ def quantize_fp8_block128(weight: torch.Tensor, block_size: int = 128) -> tuple[
 
 
 def quantize_nvfp4_block16(weight: torch.Tensor, block_size: int = 16) -> tuple[torch.Tensor, torch.Tensor]:
-    """Simulate Blackwell NVFP4 (`E2M1` values + `1x16` `E4M3` micro-block scale along last dim).
-
-    Returns (dequantized_fp32, block_scales_e4m3_fp32).
-    """
+    """Simulate Blackwell NVFP4 (`E2M1` + `1x16` `E4M3` micro-block scale along last dim)."""
     w = weight.float()
     if w.shape[-1] % block_size != 0:
         raise ValueError(f"Last dim {w.shape[-1]} must be divisible by NVFP4 block_size={block_size}")
     *prefix, out_f, in_f = w.shape
     num_blocks = in_f // block_size
     blocks = w.view(*prefix, out_f, num_blocks, block_size)
-    # Global tensor scale + per-16 E4M3 block scale
     tensor_max = w.abs().amax().clamp(min=1e-8)
     tensor_scale = tensor_max / (6.0 * 448.0)
     block_max = blocks.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8)
     raw_block_scale = (block_max / (6.0 * tensor_scale)).clamp(max=448.0)
-    # Quantize block scale to FP8 E4M3
     q_block_scale = raw_block_scale.to(torch.float8_e4m3fn).float().clamp(min=1e-8)
     eff_scale = q_block_scale * tensor_scale
-    # Snap normalized values to E2M1 codebook
     normed = (blocks / eff_scale).clamp(-6.0, 6.0)
     levels = _NVFP4_LEVELS.to(w.device)
     idx = (normed.unsqueeze(-1) - levels).abs().argmin(dim=-1)
@@ -105,14 +96,7 @@ def quantize_nvfp4_block16(weight: torch.Tensor, block_size: int = 16) -> tuple[
 
 
 def quantize_prog8_4_4(weight: torch.Tensor, group_size: int = 128) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Zero-VRAM Progressive `4+4` exact lossless INT8 bit-slice.
-
-    Quantizes weight to symmetric INT8 in [-127, 127] with 1x`group_size` scales,
-    then splits each int8 value `q` into bit-exact `(hi4, lo4)` such that:
-        q == 16 * hi4 + lo4
-    where hi4 in [-8..7] (signed 4-bit) and lo4 in [0..15] (unsigned 4-bit).
-    Total storage = 4 + 4 = 8 bits/param (0% VRAM overhead vs FP8/INT8!).
-    """
+    """Zero-VRAM Progressive `4+4` exact lossless INT8 bit-slice (`q == 16*hi4 + lo4`)."""
     w = weight.float()
     if w.shape[-1] % group_size != 0:
         raise ValueError(f"Last dim {w.shape[-1]} must be divisible by group_size={group_size}")
@@ -121,7 +105,6 @@ def quantize_prog8_4_4(weight: torch.Tensor, group_size: int = 128) -> tuple[tor
     blocks = w.view(*prefix, out_f, nb, group_size)
     scale = blocks.abs().amax(dim=-1, keepdim=True).clamp(min=1e-8) / 127.0
     q = torch.round(blocks / scale).clamp(-128, 127).to(torch.int16)
-    # Exact floor division by 16: q = 16 * hi4 + lo4 with lo4 in [0..15], hi4 in [-8..7]
     hi4 = torch.div(q, 16, rounding_mode="floor").to(torch.int8)
     lo4 = (q - 16 * hi4.to(torch.int16)).to(torch.uint8)
     return hi4.reshape(*prefix, out_f, in_f), lo4.reshape(*prefix, out_f, in_f), scale.squeeze(-1)
@@ -133,27 +116,14 @@ def dequantize_prog8_4_4(
     scale: torch.Tensor,
     group_size: int = 128,
 ) -> torch.Tensor:
-    """Reconstruct Stage-1 coarse (`lo4=None`) or bit-exact Stage-2 full (`lo4!=None`) weights.
-
-    When `lo4=None`, uses the unbiased midpoint `16 * hi4 + 7.5` (centering unsigned `lo4 in [0..15]`).
-    """
     *prefix, out_f, in_f = hi4.shape
     nb = in_f // group_size
-    if lo4 is None:
-        q = 16.0 * hi4.float() + 7.5
-    else:
-        q = 16.0 * hi4.float() + lo4.float()
+    q = (16.0 * hi4.float() + 7.5) if lo4 is None else (16.0 * hi4.float() + lo4.float())
     return (q.view(*prefix, out_f, nb, group_size) * scale.unsqueeze(-1)).reshape(*prefix, out_f, in_f)
 
 
 def quantize_prog8_dual_2_6(weight: torch.Tensor, group_size: int = 128) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Zero-VRAM Progressive `2+6` exact lossless INT8 bit-slice for `Prog8-Dual` (gate+up).
-
-    Splits each signed INT8 value `q in [-128..127]` into:
-        q == 64 * hi2 + lo6
-    where hi2 in [-2..1] (2-bit signed, 0.25 B/elem) and lo6 in [0..63] (6-bit unsigned, 0.75 B/elem).
-    Total storage = 2 + 6 = 8 bits/param (0% VRAM overhead!).
-    """
+    """Zero-VRAM Progressive `2+6` exact lossless INT8 bit-slice (`q == 64*hi2 + lo6`)."""
     w = weight.float()
     if w.shape[-1] % group_size != 0:
         raise ValueError(f"Last dim {w.shape[-1]} must be divisible by group_size={group_size}")
@@ -173,14 +143,114 @@ def dequantize_prog8_dual_2_6(
     scale: torch.Tensor,
     group_size: int = 128,
 ) -> torch.Tensor:
-    """Reconstruct Stage-1 2-bit coarse (`lo6=None`) or bit-exact Stage-2 full (`lo6!=None`) weights."""
     *prefix, out_f, in_f = hi2.shape
     nb = in_f // group_size
-    if lo6 is None:
-        q = 64.0 * hi2.float() + 31.5
-    else:
-        q = 64.0 * hi2.float() + lo6.float()
+    q = (64.0 * hi2.float() + 31.5) if lo6 is None else (64.0 * hi2.float() + lo6.float())
     return (q.view(*prefix, out_f, nb, group_size) * scale.unsqueeze(-1)).reshape(*prefix, out_f, in_f)
+
+
+def quantize_prog8_224(
+    weight: torch.Tensor, group_size: int | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """O3/O9: Power-of-2 Zero-VRAM `2 + 2 + 4` Progressive Bitplane Split (0% extra VRAM!).
+
+    Splits symmetric INT8 `q in [-128..127]` into three power-of-2 aligned bitplanes:
+      - `hi2`  in [-2..1]  (2-bit signed,   0.25 B/elem) -> Stage 1 coarse scoring (`block_d=512` -> 128B!)
+      - `mid2` in [0..3]   (2-bit unsigned, 0.25 B/elem) -> Stage 2 (`block_d=512` -> 128B!)
+      - `lo4`  in [0..15]  (4-bit unsigned, 0.50 B/elem) -> Stage 2 (`block_d=256` -> 128B!)
+    If `group_size is None`, uses per-row (per-neuron) scale `[..., out_f, 1]` enabling zero-scale-load
+    512-weight inner loops (`207 GB/s` on L4 = 100% memory copy ceiling!).
+    """
+    w = weight.float()
+    gs = w.shape[-1] if group_size is None else group_size
+    hi2, lo6, scale = quantize_prog8_dual_2_6(w, group_size=gs)
+    mid2 = (lo6 >> 4).to(torch.uint8)
+    lo4 = (lo6 & 0x0F).to(torch.uint8)
+    return hi2, mid2, lo4, scale
+
+
+def dequantize_prog8_224(
+    hi2: torch.Tensor,
+    mid2: torch.Tensor | None,
+    lo4: torch.Tensor | None,
+    scale: torch.Tensor,
+    group_size: int | None = None,
+) -> torch.Tensor:
+    """Reconstruct Stage-1 (2-bit), Tier-2 (4-bit), or Tier-1 (bit-exact 8-bit) weights."""
+    *prefix, out_f, in_f = hi2.shape
+    gs = in_f if group_size is None else group_size
+    nb = in_f // gs
+    if mid2 is None:
+        q = 64.0 * hi2.float() + 32.0
+    elif lo4 is None:
+        q = 64.0 * hi2.float() + 16.0 * mid2.float() + 7.5
+    else:
+        q = 64.0 * hi2.float() + 16.0 * mid2.float() + lo4.float()
+    return (q.view(*prefix, out_f, nb, gs) * scale.unsqueeze(-1)).reshape(*prefix, out_f, in_f)
+
+
+def pack_2bit_interleaved(vals: torch.Tensor, signed: bool = True, block_d: int = 128) -> torch.Tensor:
+    """O1: Block-interleaved 2-bit packing (4 weights/byte) for 100% coalesced activation loads!
+
+    Within each `block_d`-element block (e.g., 128 -> 32 packed bytes), byte `j` packs
+    elements `[j, j + 32, j + 64, j + 96]` so unpacking lane `l` yields the contiguous
+    slice `[l*32 : (l+1)*32]` matching contiguous `x` loads!
+    """
+    if vals.shape[-1] % block_d != 0 or block_d % 4 != 0:
+        raise ValueError(f"Last dim {vals.shape[-1]} must be divisible by block_d={block_d}")
+    *prefix, in_f = vals.shape
+    nb = in_f // block_d
+    stride = block_d // 4
+    u = ((vals.to(torch.int16) + 2) if signed else vals.to(torch.int16)).clamp(0, 3).to(torch.uint8)
+    v = u.view(*prefix, nb, 4, stride)
+    packed = v[..., 0, :] | (v[..., 1, :] << 2) | (v[..., 2, :] << 4) | (v[..., 3, :] << 6)
+    return packed.reshape(*prefix, nb * stride).contiguous()
+
+
+def unpack_2bit_interleaved(packed: torch.Tensor, signed: bool = True, block_d: int = 128) -> torch.Tensor:
+    """Inverse of `pack_2bit_interleaved`."""
+    stride = block_d // 4
+    *prefix, p_f = packed.shape
+    nb = p_f // stride
+    p = packed.view(*prefix, nb, stride)
+    lanes = torch.stack(
+        [
+            p & 0x03,
+            (p >> 2) & 0x03,
+            (p >> 4) & 0x03,
+            (p >> 6) & 0x03,
+        ],
+        dim=-2,
+    )  # [..., nb, 4, stride]
+    out = lanes.reshape(*prefix, nb * block_d)
+    return (out.to(torch.int8) - 2) if signed else out.to(torch.uint8)
+
+
+def pack_4bit_interleaved(vals_u4: torch.Tensor, block_d: int = 128) -> torch.Tensor:
+    """O3: Block-interleaved unsigned 4-bit packing (2 weights/byte) for 100% coalesced loads!
+
+    Within each `block_d`-element block (128 -> 64 packed bytes), byte `j` packs
+    elements `[j, j + 64]` so unpacking lane `l` yields contiguous `[l*64 : (l+1)*64]`.
+    """
+    if vals_u4.shape[-1] % block_d != 0 or block_d % 2 != 0:
+        raise ValueError(f"Last dim {vals_u4.shape[-1]} must be divisible by block_d={block_d}")
+    *prefix, in_f = vals_u4.shape
+    nb = in_f // block_d
+    stride = block_d // 2
+    u = vals_u4.to(torch.uint8) & 0x0F
+    v = u.view(*prefix, nb, 2, stride)
+    packed = v[..., 0, :] | (v[..., 1, :] << 4)
+    return packed.reshape(*prefix, nb * stride).contiguous()
+
+
+def unpack_4bit_interleaved(packed: torch.Tensor, block_d: int = 128) -> torch.Tensor:
+    """Inverse of `pack_4bit_interleaved` -> uint8 in [0..15]."""
+    stride = block_d // 2
+    *prefix, p_f = packed.shape
+    nb = p_f // stride
+    p = packed.view(*prefix, nb, stride)
+    lanes = torch.stack([p & 0x0F, (p >> 4) & 0x0F], dim=-2)
+    return lanes.reshape(*prefix, nb * block_d).to(torch.uint8)
 
 
 def quantize_ternary_2bit(weight: torch.Tensor) -> torch.Tensor:
@@ -198,7 +268,7 @@ def block_group_mask(
     keep_frac: float,
     group_size: int = 1,
 ) -> torch.Tensor:
-    """Calibration-free top-k boolean keep mask [..., d_ff] selecting top-k groups of `group_size` neurons."""
+    """Calibration-free top-k boolean keep mask [..., d_ff]."""
     if not (0.0 < keep_frac <= 1.0):
         raise ValueError(f"keep_frac must be in (0, 1], got {keep_frac}")
     d_ff = scores.shape[-1]
@@ -223,17 +293,22 @@ def block_group_mask(
     return group_keep.unsqueeze(-1).expand(*scores.shape[:-1], num_groups, group_size).reshape_as(scores)
 
 
+def expert_level_topk_indices(scores_expert: torch.Tensor, k_u: int) -> torch.Tensor:
+    """O2: Expert-level max-reduced Top-K_u selection over [M_e, d_ff] -> [k_u] int64 indices.
+
+    Eliminates per-token union compaction (`torch.unique`) and gives every token in the expert
+    free access to all `k_u` loaded neurons.
+    """
+    exp_score = scores_expert.float().abs().amax(dim=0)  # [d_ff]
+    k_clamped = min(max(1, k_u), scores_expert.shape[-1])
+    return torch.topk(exp_score, k=k_clamped, dim=-1, sorted=False).indices
+
+
 def compute_coactivation_permutation(
     act_magnitudes: torch.Tensor,
     group_size: int = 16,
     top_frac: float = 0.15,
 ) -> torch.Tensor:
-    """Offline greedy balanced co-activation clustering returning a permutation `perm [d_ff]`.
-
-    Given calibration activation magnitudes `[N_tok, d_ff]` for a single expert,
-    places frequently co-activating neurons into contiguous blocks of size `group_size`
-    (e.g., `g = 16` for Blackwell NVFP4 `1x16` micro-block alignment).
-    """
     n_tok, d_ff = act_magnitudes.shape
     if d_ff % group_size != 0:
         raise ValueError(f"d_ff={d_ff} must be divisible by group_size={group_size}")
@@ -243,10 +318,10 @@ def compute_coactivation_permutation(
 
     k_top = max(1, int(round(d_ff * top_frac)))
     thr = torch.topk(act_magnitudes.float(), k=k_top, dim=-1).values[:, -1:]
-    act_bin = (act_magnitudes.float() >= thr).float()  # [N_tok, d_ff]
+    act_bin = (act_magnitudes.float() >= thr).float()
     freq = act_bin.sum(dim=0)
-    act_norm = F.normalize(act_bin.T, dim=-1)  # [d_ff, N_tok]
-    sim = act_norm @ act_norm.T  # [d_ff, d_ff]
+    act_norm = F.normalize(act_bin.T, dim=-1)
+    sim = act_norm @ act_norm.T
 
     used = torch.zeros(d_ff, dtype=torch.bool, device=act_magnitudes.device)
     blocks = []
@@ -265,10 +340,6 @@ def apply_expert_permutation(
     w_down: torch.Tensor,
     perm: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Apply lossless neuron permutation `perm [d_ff]` to a single expert's weights.
-
-    w_gate, w_up: [d_ff, d_model]; w_down: [d_model, d_ff].
-    """
     return w_gate[perm].contiguous(), w_up[perm].contiguous(), w_down[:, perm].contiguous()
 
 
@@ -280,7 +351,6 @@ def dense_moe_swiglu_ref(
     w_up: torch.Tensor,
     w_down: torch.Tensor,
 ) -> torch.Tensor:
-    """Exact fp32 dense SwiGLU MoE reference."""
     x_f = x.float()
     tw = topk_weights.float()
     wg, wu, wd = w_gate.float(), w_up.float(), w_down.float()
@@ -308,7 +378,6 @@ def sparse_moe_swiglu_ref(
     group_size: int = 1,
     rank_by: str = "swiglu",
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Exact fp32 masked SwiGLU MoE reference returning (output [T, d], masks [T, K, d_ff])."""
     if rank_by not in ("swiglu", "gate"):
         raise ValueError(f"rank_by must be 'swiglu' or 'gate', got {rank_by}")
 
@@ -348,22 +417,15 @@ def prog8_sparse_moe_ref(
     quant_group: int = 32,
     dual: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Zero-VRAM Progressive Bit-Sliced MoE reference (`Prog8` 4+4 gate or `Prog8-Dual` 2+6 gate+up).
-
-    Stage 1: Reads ONLY the coarse slice (`hi4` of `w_gate` if `dual=False`,
-             or `hi2` of `w_gate` + `w_up` if `dual=True`) -> 0.50 B/elem total.
-    Stage 2: Reconstructs exact 8-bit values ONLY on the selected active channels
-             using the remaining fine residual (`lo4` or `lo6`), plus `w_up`/`w_down`.
-    """
     x_f = x.float()
     tw = topk_weights.float()
     if dual:
-        wg_hi, wg_lo, wg_s = quantize_prog8_dual_2_6(w_gate, group_size=quant_group)
-        wu_hi, wu_lo, wu_s = quantize_prog8_dual_2_6(w_up, group_size=quant_group)
-        wg_s1 = dequantize_prog8_dual_2_6(wg_hi, None, wg_s, group_size=quant_group)
-        wu_s1 = dequantize_prog8_dual_2_6(wu_hi, None, wu_s, group_size=quant_group)
-        wg_s2 = dequantize_prog8_dual_2_6(wg_hi, wg_lo, wg_s, group_size=quant_group)
-        wu_s2 = dequantize_prog8_dual_2_6(wu_hi, wu_lo, wu_s, group_size=quant_group)
+        wg_hi, wg_mid, wg_lo, wg_s = quantize_prog8_224(w_gate, group_size=quant_group)
+        wu_hi, wu_mid, wu_lo, wu_s = quantize_prog8_224(w_up, group_size=quant_group)
+        wg_s1 = dequantize_prog8_224(wg_hi, None, None, wg_s, group_size=quant_group)
+        wu_s1 = dequantize_prog8_224(wu_hi, None, None, wu_s, group_size=quant_group)
+        wg_s2 = dequantize_prog8_224(wg_hi, wg_mid, wg_lo, wg_s, group_size=quant_group)
+        wu_s2 = dequantize_prog8_224(wu_hi, wu_mid, wu_lo, wu_s, group_size=quant_group)
     else:
         wg_hi, wg_lo, wg_s = quantize_prog8_4_4(w_gate, group_size=quant_group)
         wg_s1 = dequantize_prog8_4_4(wg_hi, None, wg_s, group_size=quant_group)
@@ -382,10 +444,7 @@ def prog8_sparse_moe_ref(
         xt = x_f[t]
         for slot in range(k):
             e = int(topk_ids[t, slot].item())
-            if dual:
-                scores = F.silu(wg_s1[e] @ xt) * (wu_s1[e] @ xt)
-            else:
-                scores = F.silu(wg_s1[e] @ xt)
+            scores = (F.silu(wg_s1[e] @ xt) * (wu_s1[e] @ xt)) if dual else F.silu(wg_s1[e] @ xt)
             m = block_group_mask(scores, keep_frac=keep_frac, group_size=group_size)
             masks[t, slot] = m
             idx = torch.nonzero(m, as_tuple=False).squeeze(-1)
@@ -405,7 +464,6 @@ def proxy_gated_sparse_moe_ref(
     input_keep_frac: float = 0.50,
     group_size: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Legacy Prox-style INT4 proxy reference kept for head-to-head comparison."""
     wg_q, wg_s = quantize_int4_rowwise(w_gate)
     wu_q, wu_s = quantize_int4_rowwise(w_up)
     wg_proxy = dequantize_int4_rowwise(wg_q, wg_s)

@@ -79,12 +79,29 @@ def test_prog8_4_4_and_2_6_bit_exact_reconstruction():
     # Must match 4+4 bit-exactly because both encode the exact same INT8 grid!
     assert torch.allclose(w_full2, w_full4, atol=1e-6, rtol=1e-6)
 
-    # 2-bit packed uint8 roundtrip (4 weights per byte = 0.25 B/elem)
-    from sparse_moe_mm.kernels import pack_2bit_hi, unpack_2bit_hi
+    # O3: Power-of-2 2+2+4 bitplane split == bit-exact INT8 + O1 interleaved packing roundtrip!
+    from sparse_moe_mm.reference import (
+        dequantize_prog8_224,
+        pack_2bit_interleaved,
+        pack_4bit_interleaved,
+        quantize_prog8_224,
+        unpack_2bit_interleaved,
+        unpack_4bit_interleaved,
+    )
 
-    packed2 = pack_2bit_hi(hi2)
-    assert packed2.dtype == torch.uint8 and packed2.shape == (4, 64, 32)
-    assert torch.equal(unpack_2bit_hi(packed2), hi2)
+    hi2_b, mid2_b, lo4_b, s224 = quantize_prog8_224(w, group_size=128)
+    w_full_224 = dequantize_prog8_224(hi2_b, mid2_b, lo4_b, s224, group_size=128)
+    w_tier2_4bit = dequantize_prog8_224(hi2_b, mid2_b, None, s224, group_size=128)
+    assert torch.allclose(w_full_224, w_full4, atol=1e-6, rtol=1e-6)
+    assert float((w_tier2_4bit - w).norm() / w.norm()) < 0.20
+
+    p_hi2 = pack_2bit_interleaved(hi2_b, signed=True, block_d=128)
+    p_mid2 = pack_2bit_interleaved(mid2_b, signed=False, block_d=128)
+    p_lo4 = pack_4bit_interleaved(lo4_b, block_d=128)
+    assert p_hi2.shape == (4, 64, 32) and p_mid2.shape == (4, 64, 32) and p_lo4.shape == (4, 64, 64)
+    assert torch.equal(unpack_2bit_interleaved(p_hi2, signed=True, block_d=128), hi2_b)
+    assert torch.equal(unpack_2bit_interleaved(p_mid2, signed=False, block_d=128), mid2_b)
+    assert torch.equal(unpack_4bit_interleaved(p_lo4, block_d=128), lo4_b)
 
 
 def test_fp8_block128_nvfp4_block16_and_ternary_bounds():
