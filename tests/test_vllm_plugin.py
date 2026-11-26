@@ -140,3 +140,13 @@ def test_hybrid_layer_policy_and_plugin_registration():
     )
     register()
     assert PLUGIN_REGISTRY["prog8_sparse_fp8"] is Prog8SparseMoEExperts
+
+    # Verify vLLM v0.34+ FusedMoEExpertsModular abstract contract methods
+    w13, _, _, w_down = _make_vllm_moe_weights(e=4, d_model=128, d_ff=128)
+    packed = pack_hf_fp8_experts(w13, w_down, config=cfg)
+    experts = Prog8SparseMoEExperts(packed, config=cfg)
+    ws13, ws2, out_s = experts.workspace_shapes(
+        M=16, N=128, K=128, topk=4, global_num_experts=4, local_num_experts=4
+    )
+    assert ws13 == (64, 128) and ws2 == (64, 128) and out_s == (16, 128)
+    assert experts.finalize_weight_and_reduce_impl() == "noop"

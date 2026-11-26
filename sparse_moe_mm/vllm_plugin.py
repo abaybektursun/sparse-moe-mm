@@ -414,6 +414,37 @@ class Prog8SparseMoEExperts(_BASE_EXPERTS_CLS):
         output.copy_(combined.to(output.dtype))
         return output
 
+    def workspace_shapes(
+        self,
+        M: int,
+        N: int,
+        K: int,
+        topk: int,
+        global_num_experts: int,
+        local_num_experts: int,
+        expert_tokens_meta: Any = None,
+        activation: Any = "silu",
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+        """vLLM v0.34+ `FusedMoEExpertsModular` abstract method returning (ws13, ws2, fused_out) shapes."""
+        del K, global_num_experts, local_num_experts, expert_tokens_meta, activation
+        n_pairs = M * topk
+        ws13_shape = (n_pairs, N)
+        ws2_shape = (n_pairs, self.weights.d_model)
+        out_shape = (M, self.weights.d_model)
+        return ws13_shape, ws2_shape, out_shape
+
+    def finalize_weight_and_reduce_impl(self) -> Any:
+        """vLLM v0.34+ `FusedMoEExpertsModular` abstract method.
+
+        Since `apply()` already applies router weights and reduces across `topk` into `output`,
+        returns `TopKWeightAndReduceNoOP` when running inside vLLM (or `"noop"` standalone).
+        """
+        if HAS_VLLM and _vllm_mk is not None:
+            noop_cls = getattr(_vllm_mk, "TopKWeightAndReduceNoOP", None)
+            if noop_cls is not None:
+                return noop_cls()
+        return "noop"
+
     def apply(
         self,
         output: torch.Tensor,
@@ -562,7 +593,7 @@ PLUGIN_REGISTRY: dict[str, type[Prog8SparseMoEExperts]] = {
 
 
 def register() -> None:
-    """vLLM `vllm.general_plugins` entry-point hook."""
+    """vLLM v0.34+ `vllm.general_plugins` entry-point hook."""
     if os.environ.get("SPARSE_MOE_MM_DISABLE", "0") == "1":
         return
     PLUGIN_REGISTRY["prog8_sparse_fp8"] = Prog8SparseMoEExperts
@@ -570,3 +601,12 @@ def register() -> None:
         reg = getattr(_vllm_mk, "FUSED_MOE_EXPERTS_REGISTRY", None)
         if isinstance(reg, dict):
             reg["prog8_sparse_fp8"] = Prog8SparseMoEExperts
+        # Also hook into vLLM v0.34+ MoE kernel-selection oracle if present
+        try:
+            import vllm.model_executor.layers.fused_moe.oracle as _vllm_oracle
+
+            oracle_reg = getattr(_vllm_oracle, "CUSTOM_MOE_EXPERTS_REGISTRY", None)
+            if isinstance(oracle_reg, dict):
+                oracle_reg["prog8_sparse_fp8"] = Prog8SparseMoEExperts
+        except ImportError:
+            pass

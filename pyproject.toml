@@ -5,17 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sparse-moe-mm"
 version = "0.1.0"
-description = "Quantized (FP8/NVFP4) proxy-gated all-3-matrix sparse grouped_mm for fine-grained MoE inference"
+description = "Zero-VRAM quantized (FP8/NVFP4) progressive bit-sliced sparse grouped_mm for fine-grained MoE inference"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "numpy>=1.26",
-    "torch>=2.6",
+    "numpy>=2.0",
+    "torch>=2.11",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-gpu = ["triton>=3.2"]
+gpu = ["triton>=3.8"]
+vllm = ["vllm>=0.34.0"]
 
 [project.entry-points."vllm.general_plugins"]
 prog8_sparse_fp8 = "sparse_moe_mm.vllm_plugin:register"
